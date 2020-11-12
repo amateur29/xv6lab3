@@ -33,13 +33,13 @@ kinit1(void *vstart, void *vend)
 {
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
-  freerange(vstart, vend);
+  freerange(vstart, vend);        //to add pages to freelist
 }
 
 void
 kinit2(void *vstart, void *vend)
 {
-  freerange(vstart, vend);
+  freerange(vstart, vend);        //to add pages to freelist
   kmem.use_lock = 1;
 }
 
@@ -61,8 +61,9 @@ kfree(char *v)
 {
   struct run *r;
 
+  
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
-    panic("kfree");
+    panic("kfree in kalloc.c");
 
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
@@ -93,4 +94,3 @@ kalloc(void)
     release(&kmem.lock);
   return (char*)r;
 }
-

@@ -23,9 +23,11 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 static void itrunc(struct inode*);
+static void bfree(int dev, uint b);
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
+int numallocblocks = 0;
 
 // Read the super block.
 void
@@ -58,23 +60,68 @@ balloc(uint dev)
 {
   int b, bi, m;
   struct buf *bp;
-
   bp = 0;
   for(b = 0; b < sb.size; b += BPB){
     bp = bread(dev, BBLOCK(b, sb));
     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
       m = 1 << (bi % 8);
       if((bp->data[bi/8] & m) == 0){  // Is block free?
+        begin_op();
         bp->data[bi/8] |= m;  // Mark block in use.
         log_write(bp);
         brelse(bp);
         bzero(dev, b + bi);
+        end_op();
         return b + bi;
       }
     }
     brelse(bp);
   }
   panic("balloc: out of blocks");
+}
+
+/* Similar to balloc, except allocates eight consecutive
+ * free blocks. It is okay, if you assume that the first
+ * block is always 8 bytes aligned.
+ */
+uint
+balloc_page(uint dev)
+{
+  uint allocatedBlocks[100000];
+  int indexNCB=-1;     //pointer for above array, keeps track till where it is filled
+  // bp = 0;
+  for(int i=0;i<8;i++){
+      indexNCB++;
+      //begin_op();
+      allocatedBlocks[indexNCB] = balloc(dev);
+      //end_op();
+
+      if(i>0){
+          if((allocatedBlocks[indexNCB]-allocatedBlocks[indexNCB-1])!=1)  //this allocated block in non consecutive
+          {
+              i=0;    //start allocating blocks again
+          }
+      }
+    }
+    for(int i=0;i<=indexNCB-8;i++){
+      bfree(ROOTDEV,allocatedBlocks[i]);    //free unnecesarily allocated blocks
+    }
+    numallocblocks+=1;      //*****************
+
+	  return allocatedBlocks[indexNCB-7];  //return last 8 blocks (address of 1st block among them)
+}
+
+/* Free disk blocks allocated using balloc_page.
+ */
+void
+bfree_page(int dev, uint b)
+{ //*******************xv7*****************
+  // cprintf("In Bfree Page\n");
+  for(uint i=0;i<8;i++){
+    bfree(ROOTDEV,b+i);
+  }
+  numallocblocks-=1;      //*****************
+
 }
 
 // Free a disk block.
@@ -84,13 +131,15 @@ bfree(int dev, uint b)
   struct buf *bp;
   int bi, m;
 
+  readsb(dev, &sb);
   bp = bread(dev, BBLOCK(b, sb));
   bi = b % BPB;
   m = 1 << (bi % 8);
   if((bp->data[bi/8] & m) == 0)
     panic("freeing free block");
   bp->data[bi/8] &= ~m;
-  log_write(bp);
+  //*******xv7 : permanent, dont remove *********
+  bwrite(bp);
   brelse(bp);
 }
 
@@ -172,7 +221,7 @@ void
 iinit(int dev)
 {
   int i = 0;
-  
+
   initlock(&icache.lock, "icache");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&icache.inode[i].lock, "inode");
